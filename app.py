@@ -1,10 +1,31 @@
 import streamlit as st
 from openai import OpenAI
+import sqlite3
+from datetime import datetime
 
 st.set_page_config(page_title="SOAP 시뮬레이터", layout="wide")
 
 st.title("SOAP 시뮬레이터")
 st.caption("최소 입력으로 임상형 SOAP 자동 생성")
+
+# -------- DB 연결 및 테이블 생성 --------
+conn = sqlite3.connect("soap.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS soap_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT,
+    body_part TEXT,
+    nrs INTEGER,
+    age INTEGER,
+    sex TEXT,
+    session_count INTEGER,
+    extra_notes TEXT,
+    result TEXT
+)
+""")
+conn.commit()
 
 # OpenAI API Key
 try:
@@ -31,7 +52,6 @@ with col2:
         height=140,
         max_chars=400
     )
-
 
 # -------- SOAP 생성 함수 --------
 def generate_soap(body_part, nrs, age, sex, session_count, extra_notes):
@@ -135,14 +155,65 @@ Progression:
 
     return response.output_text
 
+# -------- DB 저장 함수 --------
+def save_history(body_part, nrs, age, sex, session_count, extra_notes, result):
+    cursor.execute("""
+        INSERT INTO soap_history (
+            created_at, body_part, nrs, age, sex, session_count, extra_notes, result
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        body_part,
+        nrs,
+        age,
+        sex,
+        session_count,
+        extra_notes,
+        result
+    ))
+    conn.commit()
+
+# -------- 저장된 기록 불러오기 함수 --------
+def load_history():
+    cursor.execute("""
+        SELECT id, created_at, body_part, nrs, age, sex, session_count, extra_notes, result
+        FROM soap_history
+        ORDER BY id DESC
+    """)
+    return cursor.fetchall()
 
 # -------- 버튼 --------
 if st.button("SOAP 생성"):
     try:
         result = generate_soap(body_part, nrs, age, sex, session_count, extra_notes)
+        save_history(body_part, nrs, age, sex, session_count, extra_notes, result)
 
-        st.success("생성 완료")
+        st.success("생성 및 저장 완료")
         st.text_area("SOAP NOTE", result, height=900)
 
     except Exception as e:
         st.error(f"오류 발생: {e}")
+
+# -------- 저장 기록 보기 --------
+st.divider()
+st.subheader("저장된 기록")
+
+history = load_history()
+
+if not history:
+    st.info("저장된 기록이 없습니다.")
+else:
+    for item in history:
+        record_id, created_at, h_body_part, h_nrs, h_age, h_sex, h_session_count, h_extra_notes, h_result = item
+
+        title = f"{record_id} | {created_at} | {h_body_part} | NRS {h_nrs} | {h_age}세 | {h_sex} | {h_session_count}회차"
+
+        with st.expander(title):
+            if h_extra_notes:
+                st.markdown(f"**추가 요청사항:** {h_extra_notes}")
+            st.text_area(
+                f"SOAP_NOTE_{record_id}",
+                h_result,
+                height=400,
+                key=f"soap_result_{record_id}"
+            )
