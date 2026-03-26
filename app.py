@@ -16,6 +16,7 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS soap_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT,
+    patient_name TEXT,
     body_part TEXT,
     nrs INTEGER,
     age INTEGER,
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS soap_history (
 """)
 conn.commit()
 
-# OpenAI API Key
+# -------- OpenAI API Key --------
 try:
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except Exception:
@@ -44,6 +45,7 @@ with col1:
     session_count = st.number_input("회차 수", min_value=1, max_value=30, step=1, value=1)
 
 with col2:
+    patient_name = st.text_input("환자 이름")
     age = st.number_input("나이", min_value=0, max_value=120, step=1)
     sex = st.selectbox("성별", ["M", "F"])
     extra_notes = st.text_area(
@@ -152,17 +154,17 @@ Progression:
         model="gpt-5.4-mini",
         input=prompt
     )
-
     return response.output_text
 
-# -------- DB 저장 함수 --------
-def save_history(body_part, nrs, age, sex, session_count, extra_notes, result):
+# -------- DB 함수 --------
+def save_history(patient_name, body_part, nrs, age, sex, session_count, extra_notes, result):
     cursor.execute("""
         INSERT INTO soap_history (
-            created_at, body_part, nrs, age, sex, session_count, extra_notes, result
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, patient_name, body_part, nrs, age, sex, session_count, extra_notes, result
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        patient_name,
         body_part,
         nrs,
         age,
@@ -173,23 +175,37 @@ def save_history(body_part, nrs, age, sex, session_count, extra_notes, result):
     ))
     conn.commit()
 
-# -------- 저장된 기록 불러오기 함수 --------
-def load_history():
-    cursor.execute("""
-        SELECT id, created_at, body_part, nrs, age, sex, session_count, extra_notes, result
-        FROM soap_history
-        ORDER BY id DESC
-    """)
+def load_history(search_name=""):
+    if search_name.strip():
+        cursor.execute("""
+            SELECT id, created_at, patient_name, body_part, nrs, age, sex, session_count, extra_notes, result
+            FROM soap_history
+            WHERE patient_name LIKE ?
+            ORDER BY id DESC
+        """, (f"%{search_name.strip()}%",))
+    else:
+        cursor.execute("""
+            SELECT id, created_at, patient_name, body_part, nrs, age, sex, session_count, extra_notes, result
+            FROM soap_history
+            ORDER BY id DESC
+        """)
     return cursor.fetchall()
 
-# -------- 버튼 --------
+def delete_history(record_id):
+    cursor.execute("DELETE FROM soap_history WHERE id = ?", (record_id,))
+    conn.commit()
+
+# -------- 생성 버튼 --------
 if st.button("SOAP 생성"):
     try:
-        result = generate_soap(body_part, nrs, age, sex, session_count, extra_notes)
-        save_history(body_part, nrs, age, sex, session_count, extra_notes, result)
+        if not patient_name.strip():
+            st.error("환자 이름을 입력해줘.")
+        else:
+            result = generate_soap(body_part, nrs, age, sex, session_count, extra_notes)
+            save_history(patient_name, body_part, nrs, age, sex, session_count, extra_notes, result)
 
-        st.success("생성 및 저장 완료")
-        st.text_area("SOAP NOTE", result, height=900)
+            st.success("생성 및 저장 완료")
+            st.text_area("SOAP NOTE", result, height=900)
 
     except Exception as e:
         st.error(f"오류 발생: {e}")
@@ -198,22 +214,30 @@ if st.button("SOAP 생성"):
 st.divider()
 st.subheader("저장된 기록")
 
-history = load_history()
+search_name = st.text_input("환자 이름 검색", placeholder="이름 일부만 입력해도 검색됨")
+
+history = load_history(search_name)
 
 if not history:
     st.info("저장된 기록이 없습니다.")
 else:
     for item in history:
-        record_id, created_at, h_body_part, h_nrs, h_age, h_sex, h_session_count, h_extra_notes, h_result = item
+        record_id, created_at, h_patient_name, h_body_part, h_nrs, h_age, h_sex, h_session_count, h_extra_notes, h_result = item
 
-        title = f"{record_id} | {created_at} | {h_body_part} | NRS {h_nrs} | {h_age}세 | {h_sex} | {h_session_count}회차"
+        title = f"{record_id} | {created_at} | {h_patient_name} | {h_body_part} | NRS {h_nrs} | {h_age}세 | {h_sex} | {h_session_count}회차"
 
         with st.expander(title):
             if h_extra_notes:
                 st.markdown(f"**추가 요청사항:** {h_extra_notes}")
+
             st.text_area(
                 f"SOAP_NOTE_{record_id}",
                 h_result,
                 height=400,
                 key=f"soap_result_{record_id}"
             )
+
+            if st.button("삭제", key=f"delete_{record_id}"):
+                delete_history(record_id)
+                st.success(f"{record_id}번 기록 삭제 완료")
+                st.rerun()
