@@ -25,10 +25,16 @@ with col1:
 with col2:
     age = st.number_input("나이", min_value=0, max_value=120, step=1)
     sex = st.selectbox("성별", ["M", "F"])
+    extra_notes = st.text_area(
+        "추가 요청사항",
+        placeholder="예: 식당 종업원으로 근무하는 여성. 총 1회부터 10회까지 치료했고 6회차까지 호전, 7회차부터 악화되어 추가 치료 필요.",
+        height=140,
+        max_chars=400
+    )
 
 
 # -------- SOAP 생성 함수 --------
-def generate_soap(body_part, nrs, age, sex, session_count):
+def generate_soap(body_part, nrs, age, sex, session_count, extra_notes):
     prompt = f"""
 너는 물리치료 임상 SOAP 노트를 작성하는 전문가다.
 
@@ -38,6 +44,7 @@ def generate_soap(body_part, nrs, age, sex, session_count):
 나이: {age}
 성별: {sex}
 회차 수: {session_count}
+추가 요청사항: {extra_notes}
 
 규칙:
 - 허구 환자 케이스 생성
@@ -47,25 +54,33 @@ def generate_soap(body_part, nrs, age, sex, session_count):
 - 자연스러운 임상 기록 스타일 (한글+영어 혼용)
 - 불필요한 풀네임 설명 금지 (약어 그대로 사용)
 - 축약어 사용 (AROM, PROM, MMT, ER, IR, GH joint 등)
-- 기록 스타일 유지,설명문 금지
-- 수치,각도,근력은 임상적으로 plausible하게 설정
+- 기록 스타일 유지, 설명문 금지
+- 수치, 각도, 근력은 임상적으로 plausible하게 설정
 - Special test, palpation 반드시 포함
 - Key impairment 반드시 포함
 - Plan은 반드시 아래 포함:
   (Manual Therapy / Exercise Therapy / Education / Progression)
 - 각 항목은 핵심 위주로 작성
-- 각 회차의 S,O,A,P는 각각 최대 4줄 이내
+- 각 회차의 S, O, A, P는 각각 최대 4줄 이내
 - 전체적으로 concise하게 작성
 - 입력된 회차 수만큼 SOAP를 순차적으로 생성
 - 반드시 1회차부터 {session_count}회차까지 모두 생성
 - 각 회차는 동일 환자의 치료 경과를 반영해야 함
 - 초진 NRS는 1회차 기준으로 사용
-- 회차가 증가할수록 NRS는 점진적으로 감소하거나 안정화
-- ROM, strength, 기능은 점진적으로 개선되는 흐름으로 작성
-- Special test는 점진적으로 감소 경향 또는 부분 호전 양상 반영
+- 기본적으로 회차가 증가할수록 NRS는 점진적으로 감소하거나 안정화
+- 기본적으로 ROM, strength, 기능은 점진적으로 개선되는 흐름으로 작성
+- 기본적으로 Special test는 점진적으로 감소 경향 또는 부분 호전 양상 반영
 - Plan은 회차가 지날수록 progression이 반영되어야 함
-- 매 회차 내용은 서로 조금씩 달라야 하며,복붙처럼 같으면 안 됨
+- 매 회차 내용은 서로 조금씩 달라야 하며, 복붙처럼 같으면 안 됨
 - 실제 임상 차트처럼 짧고 딱딱하게 작성
+- 추가 요청사항이 있으면 SOAP 흐름에 반영하되, 전체 형식과 기록 스타일은 유지
+- 추가 요청사항은 직업, 활동 특성, 회차별 호전/악화 패턴, 기능 제한, 치료 목표, 경과 변화에 반영 가능
+- 추가 요청사항에 특정 회차 이후 악화, flare-up, plateau, 추가 치료 필요 등의 내용이 있으면 반드시 회차 흐름에 반영
+- 추가 요청사항을 그대로 복붙하지 말고 임상 기록 문체로 자연스럽게 반영
+- 추가 요청사항이 비어 있으면 기본적인 임상 경과 패턴으로 생성
+- 추가 요청사항이 기본 경과 규칙과 충돌하면, 추가 요청사항을 우선 반영하되 임상적 plausibility와 SOAP 형식은 유지
+- 한 회차라도 지나치게 좋아지거나 급격히 완치되는 흐름은 피할 것
+- 마지막 회차에서 증상이 남아있다면 Assessment와 Plan에 continued treatment 필요성을 반영할 것
 
 부위별 패턴 참고:
 - Shoulder: painful arc, Hawkins, Neer, Empty can, supraspinatus, greater tuberosity
@@ -124,7 +139,7 @@ Progression:
 # -------- 버튼 --------
 if st.button("SOAP 생성"):
     try:
-        result = generate_soap(body_part, nrs, age, sex, session_count)
+        result = generate_soap(body_part, nrs, age, sex, session_count, extra_notes)
 
         st.success("생성 완료")
         st.text_area("SOAP NOTE", result, height=900)
